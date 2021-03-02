@@ -8,11 +8,13 @@ use bevy::{
 fn main() {
     App::build()
         .add_plugins(DefaultPlugins)
+        .add_event::<CollisionEvent>()
         .insert_resource(Scoreboard { score: 0 })
         .insert_resource(ClearColor(Color::rgb(0.9, 0.9, 0.9)))
         .add_startup_system(setup.system())
         .add_system(paddle_movement_system.system())
         .add_system(ball_collision_system.system())
+        .add_system(collision_event_system.system())
         .add_system(ball_movement_system.system())
         .add_system(scoreboard_system.system())
         .run();
@@ -34,6 +36,10 @@ enum Collider {
     Solid,
     Scorable,
     Paddle,
+}
+
+struct CollisionEvent {
+    collision: Collision,
 }
 
 fn setup(
@@ -210,12 +216,12 @@ fn scoreboard_system(scoreboard: Res<Scoreboard>, mut query: Query<&mut Text>) {
 fn ball_collision_system(
     commands: &mut Commands,
     mut scoreboard: ResMut<Scoreboard>,
-    mut ball_query: Query<(&mut Ball, &Transform, &Sprite)>,
+    mut ball_query: Query<(&Transform, &Sprite), With(Ball)>,
     collider_query: Query<(Entity, &Collider, &Transform, &Sprite)>,
+    mut collision_events: ResMut<Events<CollisionEvent>>,
 ) {
-    for (mut ball, ball_transform, sprite) in ball_query.iter_mut() {
+    for (ball_transform, sprite) in ball_query.iter_mut() {
         let ball_size = sprite.size;
-        let velocity = &mut ball.velocity;
 
         // check collision with walls
         for (collider_entity, collider, transform, sprite) in collider_query.iter() {
@@ -232,33 +238,47 @@ fn ball_collision_system(
                     commands.despawn(collider_entity);
                 }
 
-                // reflect the ball when it collides
-                let mut reflect_x = false;
-                let mut reflect_y = false;
-
-                // only reflect if the ball's velocity is going in the opposite direction of the collision
-                match collision {
-                    Collision::Left => reflect_x = velocity.x > 0.0,
-                    Collision::Right => reflect_x = velocity.x < 0.0,
-                    Collision::Top => reflect_y = velocity.y < 0.0,
-                    Collision::Bottom => reflect_y = velocity.y > 0.0,
-                }
-
-                // reflect velocity on the x-axis if we hit something on the x-axis
-                if reflect_x {
-                    velocity.x = -velocity.x;
-                }
-
-                // reflect velocity on the y-axis if we hit something on the y-axis
-                if reflect_y {
-                    velocity.y = -velocity.y;
-                }
-
-                // break if this collide is on a solid, otherwise continue check whether a solid is also in collision
-                if let Collider::Solid = *collider {
-                    break;
-                }
+                collision_events.send(CollisionEvent {
+                    collision: collision,
+                })
             }
+        }
+    }
+}
+
+fn collision_event_system(
+    mut events: EventReader<CollisionEvent>, 
+    mut ball_query: Query<&mut Ball>,
+) {
+    for event in events.iter() {
+        for mut ball in ball_query.iter_mut() {
+            let velocity = &mut ball.velocity;
+
+            let mut reflect_x = false;
+            let mut reflect_y = false;
+
+            // only reflect if the ball's velocity is going in the opposite direction of the collision
+            match event.collision {
+                Collision::Left => reflect_x = velocity.x > 0.0,
+                Collision::Right => reflect_x = velocity.x < 0.0,
+                Collision::Top => reflect_y = velocity.y < 0.0,
+                Collision::Bottom => reflect_y = velocity.y > 0.0,
+            }
+
+            // reflect velocity on the x-axis if we hit something on the x-axis
+            if reflect_x {
+                velocity.x = -velocity.x;
+            }
+
+            // reflect velocity on the y-axis if we hit something on the y-axis
+            if reflect_y {
+                velocity.y = -velocity.y;
+            }
+
+            // break if this collide is on a solid, otherwise continue check whether a solid is also in collision
+            // if let Collider::Solid = *collider {
+            //     break;
+            // }
         }
     }
 }
