@@ -4,7 +4,7 @@ use bevy::{
     sprite::collide_aabb::{collide, Collision},
 };
 
-/// An implementation of the classic game "Breakout"
+/// An implementation of the classic game "Breakout" 
 fn main() {
     App::build()
         .add_plugins(DefaultPlugins)
@@ -14,6 +14,7 @@ fn main() {
         .add_startup_system(setup.system())
         .add_system(paddle_movement_system.system())
         .add_system(ball_collision_system.system())
+        .add_system(wall_collision_system.system())
         .add_system(collision_event_system.system())
         .add_system(ball_movement_system.system())
         .add_system(scoreboard_system.system())
@@ -33,14 +34,18 @@ struct Scoreboard {
 }
 
 enum Collider {
-    Solid,
     Scorable,
     Paddle,
 }
 
-struct CollisionEvent {
-    collision: Collision,
+enum Wall {
+    Left,
+    Right,
+    Top,
+    Bottom,
 }
+
+struct CollisionEvent(Collision);
 
 fn setup(
     commands: &mut Commands,
@@ -119,7 +124,7 @@ fn setup(
             sprite: Sprite::new(Vec2::new(wall_thickness, bounds.y + wall_thickness)),
             ..Default::default()
         })
-        .with(Collider::Solid)
+        .with(Wall::Left)
         // right
         .spawn(SpriteBundle {
             material: wall_material.clone(),
@@ -127,7 +132,7 @@ fn setup(
             sprite: Sprite::new(Vec2::new(wall_thickness, bounds.y + wall_thickness)),
             ..Default::default()
         })
-        .with(Collider::Solid)
+        .with(Wall::Right)
         // bottom
         .spawn(SpriteBundle {
             material: wall_material.clone(),
@@ -135,7 +140,7 @@ fn setup(
             sprite: Sprite::new(Vec2::new(bounds.x + wall_thickness, wall_thickness)),
             ..Default::default()
         })
-        .with(Collider::Solid)
+        .with(Wall::Bottom)
         // top
         .spawn(SpriteBundle {
             material: wall_material,
@@ -143,7 +148,7 @@ fn setup(
             sprite: Sprite::new(Vec2::new(bounds.x + wall_thickness, wall_thickness)),
             ..Default::default()
         })
-        .with(Collider::Solid);
+        .with(Wall::Top);
 
     // Add bricks
     let brick_rows = 4;
@@ -216,21 +221,20 @@ fn scoreboard_system(scoreboard: Res<Scoreboard>, mut query: Query<&mut Text>) {
 fn ball_collision_system(
     commands: &mut Commands,
     mut scoreboard: ResMut<Scoreboard>,
-    mut ball_query: Query<(&Transform, &Sprite), With(Ball)>,
+    mut ball_query: Query<(&Transform, &Sprite), With<Ball>>,
     collider_query: Query<(Entity, &Collider, &Transform, &Sprite)>,
     mut collision_events: ResMut<Events<CollisionEvent>>,
 ) {
-    for (ball_transform, sprite) in ball_query.iter_mut() {
-        let ball_size = sprite.size;
-
-        // check collision with walls
+    for (ball_transform, ball_sprite) in ball_query.iter_mut() {
+        // check collision with scorables
         for (collider_entity, collider, transform, sprite) in collider_query.iter() {
             let collision = collide(
                 ball_transform.translation,
-                ball_size,
+                ball_sprite.size,
                 transform.translation,
                 sprite.size,
             );
+
             if let Some(collision) = collision {
                 // scorable colliders should be despawned and increment the scoreboard on collision
                 if let Collider::Scorable = *collider {
@@ -238,9 +242,48 @@ fn ball_collision_system(
                     commands.despawn(collider_entity);
                 }
 
-                collision_events.send(CollisionEvent {
-                    collision: collision,
-                })
+                collision_events.send(CollisionEvent(collision));
+            }
+        }
+    }
+}
+
+fn wall_collision_system(
+    mut ball_query: Query<(&Transform, &Sprite), With<Ball>>,
+    mut walls_query: Query<(&Transform, &Sprite, &Wall)>,
+    mut collision_events: ResMut<Events<CollisionEvent>>,
+) {
+    for (ball_transform, ball_sprite) in ball_query.iter_mut() {
+        let ball_pos = ball_transform.translation;
+        let ball_min = ball_pos.truncate() - ball_sprite.size / 2.0;
+        let ball_max = ball_pos.truncate() + ball_sprite.size / 2.0;
+            
+        for (wall_transform, wall_sprite, wall) in walls_query.iter_mut() { 
+            let ball_pos = wall_transform.translation;   
+            let wall_min = ball_pos.truncate() - wall_sprite.size / 2.0;
+            let wall_max = ball_pos.truncate() + wall_sprite.size / 2.0;
+
+            match wall {
+                Wall::Left => {
+                    if ball_min.x < wall_max.x {
+                        collision_events.send(CollisionEvent(Collision::Right));
+                    }
+                },
+                Wall::Right => {
+                    if ball_max.x > wall_min.x {
+                        collision_events.send(CollisionEvent(Collision::Left));
+                    }
+                },
+                Wall::Bottom => {
+                    if ball_min.y < wall_max.y {
+                        collision_events.send(CollisionEvent(Collision::Top));
+                    }
+                },
+                Wall::Top => {
+                    if ball_max.y > wall_min.y {
+                        collision_events.send(CollisionEvent(Collision::Bottom));
+                    }
+                },
             }
         }
     }
@@ -258,7 +301,7 @@ fn collision_event_system(
             let mut reflect_y = false;
 
             // only reflect if the ball's velocity is going in the opposite direction of the collision
-            match event.collision {
+            match event.0 {
                 Collision::Left => reflect_x = velocity.x > 0.0,
                 Collision::Right => reflect_x = velocity.x < 0.0,
                 Collision::Top => reflect_y = velocity.y < 0.0,
@@ -274,11 +317,6 @@ fn collision_event_system(
             if reflect_y {
                 velocity.y = -velocity.y;
             }
-
-            // break if this collide is on a solid, otherwise continue check whether a solid is also in collision
-            // if let Collider::Solid = *collider {
-            //     break;
-            // }
         }
     }
 }
