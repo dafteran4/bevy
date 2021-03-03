@@ -8,14 +8,11 @@ use bevy::{
 fn main() {
     App::build()
         .add_plugins(DefaultPlugins)
-        .add_event::<CollisionEvent>()
         .insert_resource(Scoreboard { score: 0 })
         .insert_resource(ClearColor(Color::rgb(0.9, 0.9, 0.9)))
         .add_startup_system(setup.system())
         .add_system(paddle_movement_system.system())
         .add_system(ball_collision_system.system())
-        .add_system(wall_collision_system.system())
-        .add_system(collision_event_system.system())
         .add_system(ball_movement_system.system())
         .add_system(scoreboard_system.system())
         .run();
@@ -34,18 +31,18 @@ struct Scoreboard {
 }
 
 enum Collider {
+    Solid(ColliderDirection),
     Scorable,
     Paddle,
 }
 
-enum Wall {
+#[derive(Copy, Clone)]
+enum ColliderDirection {
     Left,
     Right,
     Top,
     Bottom,
 }
-
-struct CollisionEvent(Collision);
 
 fn setup(
     commands: &mut Commands,
@@ -124,7 +121,7 @@ fn setup(
             sprite: Sprite::new(Vec2::new(wall_thickness, bounds.y + wall_thickness)),
             ..Default::default()
         })
-        .with(Wall::Left)
+        .with(Collider::Solid(ColliderDirection::Left))
         // right
         .spawn(SpriteBundle {
             material: wall_material.clone(),
@@ -132,7 +129,7 @@ fn setup(
             sprite: Sprite::new(Vec2::new(wall_thickness, bounds.y + wall_thickness)),
             ..Default::default()
         })
-        .with(Wall::Right)
+        .with(Collider::Solid(ColliderDirection::Right))
         // bottom
         .spawn(SpriteBundle {
             material: wall_material.clone(),
@@ -140,7 +137,7 @@ fn setup(
             sprite: Sprite::new(Vec2::new(bounds.x + wall_thickness, wall_thickness)),
             ..Default::default()
         })
-        .with(Wall::Bottom)
+        .with(Collider::Solid(ColliderDirection::Bottom))
         // top
         .spawn(SpriteBundle {
             material: wall_material,
@@ -148,7 +145,7 @@ fn setup(
             sprite: Sprite::new(Vec2::new(bounds.x + wall_thickness, wall_thickness)),
             ..Default::default()
         })
-        .with(Wall::Top);
+        .with(Collider::Solid(ColliderDirection::Top));
 
     // Add bricks
     let brick_rows = 4;
@@ -221,19 +218,29 @@ fn scoreboard_system(scoreboard: Res<Scoreboard>, mut query: Query<&mut Text>) {
 fn ball_collision_system(
     commands: &mut Commands,
     mut scoreboard: ResMut<Scoreboard>,
-    mut ball_query: Query<(&Transform, &Sprite), With<Ball>>,
+    mut ball_query: Query<(&mut Ball, &Transform, &Sprite)>,
     collider_query: Query<(Entity, &Collider, &Transform, &Sprite)>,
-    mut collision_events: ResMut<Events<CollisionEvent>>,
 ) {
-    for (ball_transform, ball_sprite) in ball_query.iter_mut() {
+    for (mut ball, ball_transform, ball_sprite) in ball_query.iter_mut() {
+        let velocity = &mut ball.velocity;
+
         // check collision with scorables
         for (collider_entity, collider, transform, sprite) in collider_query.iter() {
-            let collision = collide(
-                ball_transform.translation,
-                ball_sprite.size,
-                transform.translation,
-                sprite.size,
-            );
+            let collision = match collider {
+                Collider::Solid(collision_side) => solid_collide(
+                    ball_transform.translation,
+                    ball_sprite.size,
+                    transform.translation,
+                    sprite.size,
+                    *collision_side,
+                ),
+                _ => collide(
+                    ball_transform.translation,
+                    ball_sprite.size,
+                    transform.translation,
+                    sprite.size,
+                )
+            };
 
             if let Some(collision) = collision {
                 // scorable colliders should be despawned and increment the scoreboard on collision
@@ -242,81 +249,72 @@ fn ball_collision_system(
                     commands.despawn(collider_entity);
                 }
 
-                collision_events.send(CollisionEvent(collision));
+                let mut reflect_x = false;
+                let mut reflect_y = false;
+    
+                // only reflect if the ball's velocity is going in the opposite direction of the collision
+                match collision {
+                    Collision::Left => reflect_x = velocity.x > 0.0,
+                    Collision::Right => reflect_x = velocity.x < 0.0,
+                    Collision::Top => reflect_y = velocity.y < 0.0,
+                    Collision::Bottom => reflect_y = velocity.y > 0.0,
+                }
+    
+                // reflect velocity on the x-axis if we hit something on the x-axis
+                if reflect_x {
+                    velocity.x = -velocity.x;
+                }
+    
+                // reflect velocity on the y-axis if we hit something on the y-axis
+                if reflect_y {
+                    velocity.y = -velocity.y;
+                }
             }
         }
     }
 }
 
-fn wall_collision_system(
-    mut ball_query: Query<(&Transform, &Sprite), With<Ball>>,
-    mut walls_query: Query<(&Transform, &Sprite, &Wall)>,
-    mut collision_events: ResMut<Events<CollisionEvent>>,
-) {
-    for (ball_transform, ball_sprite) in ball_query.iter_mut() {
-        let ball_pos = ball_transform.translation;
-        let ball_min = ball_pos.truncate() - ball_sprite.size / 2.0;
-        let ball_max = ball_pos.truncate() + ball_sprite.size / 2.0;
-            
-        for (wall_transform, wall_sprite, wall) in walls_query.iter_mut() { 
-            let ball_pos = wall_transform.translation;   
-            let wall_min = ball_pos.truncate() - wall_sprite.size / 2.0;
-            let wall_max = ball_pos.truncate() + wall_sprite.size / 2.0;
+fn solid_collide(
+    a_pos: Vec3,
+    a_size: Vec2,
+    b_pos: Vec3,
+    b_size: Vec2,
+    b_collision_side: ColliderDirection,
+) -> Option<Collision> {
+    let a_min = a_pos.truncate() - a_size / 2.0;
+    let a_max = a_pos.truncate() + a_size / 2.0;
 
-            match wall {
-                Wall::Left => {
-                    if ball_min.x < wall_max.x {
-                        collision_events.send(CollisionEvent(Collision::Right));
-                    }
-                },
-                Wall::Right => {
-                    if ball_max.x > wall_min.x {
-                        collision_events.send(CollisionEvent(Collision::Left));
-                    }
-                },
-                Wall::Bottom => {
-                    if ball_min.y < wall_max.y {
-                        collision_events.send(CollisionEvent(Collision::Top));
-                    }
-                },
-                Wall::Top => {
-                    if ball_max.y > wall_min.y {
-                        collision_events.send(CollisionEvent(Collision::Bottom));
-                    }
-                },
+    let b_min = b_pos.truncate() - b_size / 2.0;
+    let b_max = b_pos.truncate() + b_size / 2.0;
+
+    match b_collision_side {
+        ColliderDirection::Left => {
+            if a_min.x < b_max.x {
+                Some(Collision::Right)
+            } else {
+                None
             }
-        }
-    }
-}
-
-fn collision_event_system(
-    mut events: EventReader<CollisionEvent>, 
-    mut ball_query: Query<&mut Ball>,
-) {
-    for event in events.iter() {
-        for mut ball in ball_query.iter_mut() {
-            let velocity = &mut ball.velocity;
-
-            let mut reflect_x = false;
-            let mut reflect_y = false;
-
-            // only reflect if the ball's velocity is going in the opposite direction of the collision
-            match event.0 {
-                Collision::Left => reflect_x = velocity.x > 0.0,
-                Collision::Right => reflect_x = velocity.x < 0.0,
-                Collision::Top => reflect_y = velocity.y < 0.0,
-                Collision::Bottom => reflect_y = velocity.y > 0.0,
+        },
+        ColliderDirection::Right => {
+            if a_max.x > b_min.x {
+                Some(Collision::Left)
+            } else {
+                None
             }
-
-            // reflect velocity on the x-axis if we hit something on the x-axis
-            if reflect_x {
-                velocity.x = -velocity.x;
+        },
+        ColliderDirection::Bottom => {
+            if a_min.y < b_max.y {
+                Some(Collision::Top)
+            } else {
+                None
             }
-
-            // reflect velocity on the y-axis if we hit something on the y-axis
-            if reflect_y {
-                velocity.y = -velocity.y;
+        },
+        ColliderDirection::Top => {
+            if a_max.y > b_min.y {
+                Some(Collision::Bottom)
+            } else {
+                None
             }
-        }
+        },
     }
 }
