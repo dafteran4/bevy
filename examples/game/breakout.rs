@@ -4,7 +4,7 @@ use bevy::{
     sprite::collide_aabb::{collide, Collision},
 };
 
-/// An implementation of the classic game "Breakout" 
+/// An implementation of the classic game "Breakout"
 fn main() {
     App::build()
         .add_plugins(DefaultPlugins)
@@ -239,7 +239,7 @@ fn ball_collision_system(
                     ball_sprite.size,
                     transform.translation,
                     sprite.size,
-                )
+                ),
             };
 
             if let Some(collision) = collision {
@@ -251,7 +251,7 @@ fn ball_collision_system(
 
                 let mut reflect_x = false;
                 let mut reflect_y = false;
-    
+
                 // only reflect if the ball's velocity is going in the opposite direction of the collision
                 match collision {
                     Collision::Left => reflect_x = velocity.x > 0.0,
@@ -259,15 +259,20 @@ fn ball_collision_system(
                     Collision::Top => reflect_y = velocity.y < 0.0,
                     Collision::Bottom => reflect_y = velocity.y > 0.0,
                 }
-    
+
                 // reflect velocity on the x-axis if we hit something on the x-axis
                 if reflect_x {
                     velocity.x = -velocity.x;
                 }
-    
+
                 // reflect velocity on the y-axis if we hit something on the y-axis
                 if reflect_y {
                     velocity.y = -velocity.y;
+                }
+
+                // break if this collide is on a solid, otherwise continue check whether a solid is also in collision
+                if let Collider::Solid = *collider {
+                    break;
                 }
             }
         }
@@ -294,27 +299,27 @@ fn solid_collide(
             } else {
                 None
             }
-        },
+        }
         ColliderDirection::Right => {
             if a_max.x > b_min.x {
                 Some(Collision::Left)
             } else {
                 None
             }
-        },
+        }
         ColliderDirection::Bottom => {
             if a_min.y < b_max.y {
                 Some(Collision::Top)
             } else {
                 None
             }
-        },
+        }
         ColliderDirection::Top => {
             if a_max.y > b_min.y {
                 Some(Collision::Bottom)
             } else {
                 None
             }
-        },
+        }
     }
 }
