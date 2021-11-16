@@ -215,12 +215,12 @@ impl TaskPool {
                 // simply calling future::block_on(spawned) would deadlock.)
                 let mut spawned = local_executor.spawn(fut);
                 loop {
+                    while self.executor.try_tick() {}
+                    while local_executor.try_tick() {}
+
                     if let Some(result) = future::block_on(future::poll_once(&mut spawned)) {
                         break result;
                     };
-
-                    while self.executor.try_tick() {}
-                    while local_executor.try_tick() {}
                 }
             }
         })
