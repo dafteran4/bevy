@@ -219,8 +219,8 @@ impl TaskPool {
                         break result;
                     };
 
-                    self.executor.try_tick();
-                    local_executor.try_tick();
+                    while self.executor.try_tick() {}
+                    while local_executor.try_tick() {}
                 }
             }
         })
