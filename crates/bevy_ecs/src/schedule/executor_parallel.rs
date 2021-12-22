@@ -217,7 +217,25 @@ impl ParallelExecutor {
             }
             // Queue the system if it has no dependencies, otherwise reset its dependency counter.
             if system_data.dependencies_total == 0 {
-                self.queued.insert(index);
+                if Self::can_start_now(
+                    self.non_send_running,
+                    system_data,
+                    &self.active_archetype_component_access,
+                ) {
+                    system_data
+                        .start_sender
+                        .try_send(())
+                        .unwrap_or_else(|error| unreachable!(error));
+                    self.running.set(index, true);
+                    if !system_data.is_send {
+                        self.non_send_running = true;
+                    }
+                    // Add this system's access information to the active access information.
+                    self.active_archetype_component_access
+                        .extend(&system_data.archetype_component_access);
+                } else {
+                    self.queued.insert(index);
+                }
             } else {
                 system_data.dependencies_now = system_data.dependencies_total;
             }
@@ -225,13 +243,16 @@ impl ParallelExecutor {
     }
 
     /// Determines if the system with given index has no conflicts with already running systems.
-    fn can_start_now(&self, index: usize) -> bool {
-        let system_data = &self.system_metadata[index];
+    fn can_start_now(
+        non_send_running: bool,
+        system_data: &SystemSchedulingMetadata,
+        active_archetype_component_access: &Access<ArchetypeComponentId>,
+    ) -> bool {
         // Non-send systems are considered conflicting with each other.
-        (!self.non_send_running || system_data.is_send)
+        (!non_send_running || system_data.is_send)
             && system_data
                 .archetype_component_access
-                .is_compatible(&self.active_archetype_component_access)
+                .is_compatible(active_archetype_component_access)
     }
 
     /// Starts all non-conflicting queued systems, moves them from `queued` to `running`,
@@ -240,13 +261,18 @@ impl ParallelExecutor {
     async fn process_queued_systems(&mut self) {
         #[cfg(test)]
         let mut started_systems = 0;
-        for index in self.queued.ones() {
+        let queued = &mut self.queued;
+        for index in queued.ones() {
             // If the system shouldn't actually run this iteration, process it as completed
             // immediately; otherwise, check for conflicts and signal its task to start.
             let system_metadata = &self.system_metadata[index];
             if !self.should_run[index] {
                 self.dependants_scratch.extend(&system_metadata.dependants);
-            } else if self.can_start_now(index) {
+            } else if Self::can_start_now(
+                self.non_send_running,
+                system_metadata,
+                &self.active_archetype_component_access,
+            ) {
                 #[cfg(test)]
                 {
                     started_systems += 1;
