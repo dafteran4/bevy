@@ -1,5 +1,6 @@
 use crate::{archetype::ArchetypeGeneration, schedule::ParallelSystemContainer, world::World};
 use downcast_rs::{impl_downcast, Downcast};
+use std::future::Future;
 
 pub trait ParallelSystemExecutor: Downcast + Send + Sync {
     /// Called by `SystemStage` whenever `systems` have been changed.
