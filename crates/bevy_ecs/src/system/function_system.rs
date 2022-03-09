@@ -6,7 +6,7 @@ use crate::{
         check_system_change_tick, ReadOnlySystemParamFetch, System, SystemParam, SystemParamFetch,
         SystemParamItem, SystemParamState,
     },
-    world::{World, WorldId},
+    world::{World, WorldId}, schedule::SystemLabel,
 };
 use bevy_ecs_macros::all_tuples;
 use std::{borrow::Cow, marker::PhantomData};
@@ -392,6 +392,7 @@ pub struct InputMarker;
 /// You get this by calling [`IntoSystem::system`]  on a function that only accepts
 /// [`SystemParam`]s. The output of the system becomes the functions return type, while the input
 /// becomes the functions [`In`] tagged parameter or `()` if no such parameter exists.
+#[derive(Debug, PartialEq, Eq)]
 pub struct FunctionSystem<In, Out, Param, Marker, F>
 where
     Param: SystemParam,
