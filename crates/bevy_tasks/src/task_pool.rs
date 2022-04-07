@@ -209,7 +209,12 @@ impl TaskPool {
 
                 break RecvIter(rx);
             } else {
-                futures_lite::future::block_on(scope_thread_executor.tick().or(executor.tick()));
+                // TODO: the poll_once is needed for the `test_thread_locality` test to not deadlock.
+                // figure out why and ideally remove it so this fn doesn't busy-spin when waiting on
+                // the thread pool
+                futures_lite::future::block_on(futures_lite::future::poll_once(
+                    scope_thread_executor.tick().or(executor.tick()),
+                ));
             }
         }
     }
