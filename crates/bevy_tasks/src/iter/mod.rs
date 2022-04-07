@@ -39,7 +39,6 @@ where
                 s.spawn(async move { batch.count() });
             }
         })
-        .iter()
         .sum()
     }
 
@@ -105,7 +104,7 @@ where
     where
         F: FnMut(BatchIter::Item) + Send + Clone + Sync,
     {
-        pool.scope(|s| {
+        let _ = pool.scope(|s| {
             while let Some(batch) = self.next_batch() {
                 let newf = f.clone();
                 s.spawn(async move {
@@ -249,6 +248,7 @@ where
                 s.spawn(async move { batch.fold(newi, newf) });
             }
         })
+        .collect()
     }
 
     /// Tests if every element of the parallel iterator matches a predicate.
@@ -368,15 +368,16 @@ where
         F: FnMut(&BatchIter::Item) -> R + Send + Sync + Clone,
         BatchIter::Item: Send + 'static,
     {
+        let newf = f.clone();
+
         pool.scope(|s| {
             while let Some(batch) = self.next_batch() {
                 let newf = f.clone();
                 s.spawn(async move { batch.max_by_key(newf) });
             }
         })
-        .into_iter()
         .flatten()
-        .max_by_key(f)
+        .max_by_key(newf)
     }
 
     /// Returns the item that gives the maximum value with respect to the specified comparison
@@ -388,15 +389,15 @@ where
         F: FnMut(&BatchIter::Item, &BatchIter::Item) -> std::cmp::Ordering + Send + Sync + Clone,
         BatchIter::Item: Send + 'static,
     {
+        let newf = f.clone();
         pool.scope(|s| {
             while let Some(batch) = self.next_batch() {
                 let newf = f.clone();
                 s.spawn(async move { batch.max_by(newf) });
             }
         })
-        .into_iter()
         .flatten()
-        .max_by(f)
+        .max_by(newf)
     }
 
     /// Returns the item that gives the minimum value from the specified function.
@@ -408,6 +409,8 @@ where
         F: FnMut(&BatchIter::Item) -> R + Send + Sync + Clone,
         BatchIter::Item: Send + 'static,
     {
+        let newf = f.clone();
+
         pool.scope(|s| {
             while let Some(batch) = self.next_batch() {
                 let newf = f.clone();
@@ -416,7 +419,7 @@ where
         })
         .into_iter()
         .flatten()
-        .min_by_key(f)
+        .min_by_key(newf)
     }
 
     /// Returns the item that gives the minimum value with respect to the specified comparison
@@ -428,6 +431,8 @@ where
         F: FnMut(&BatchIter::Item, &BatchIter::Item) -> std::cmp::Ordering + Send + Sync + Clone,
         BatchIter::Item: Send + 'static,
     {
+        let newf = f.clone();
+
         pool.scope(|s| {
             while let Some(batch) = self.next_batch() {
                 let newf = f.clone();
@@ -436,7 +441,7 @@ where
         })
         .into_iter()
         .flatten()
-        .min_by(f)
+        .min_by(newf)
     }
 
     /// Creates a parallel iterator which copies all of its items.

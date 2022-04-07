@@ -1,12 +1,12 @@
 use std::{
     future::Future,
     mem,
-    pin::Pin,
     sync::Arc,
     thread::{self, JoinHandle},
 };
 
-use futures_lite::{future, pin};
+use async_channel::{Receiver, Sender};
+use futures_lite::{future, FutureExt};
 
 use crate::Task;
 
@@ -172,69 +172,46 @@ impl TaskPool {
     /// to spawn tasks. This function will await the completion of all tasks before returning.
     ///
     /// This is similar to `rayon::scope` and `crossbeam::scope`
-    pub fn scope<'scope, F, T>(&self, f: F) -> Vec<T>
+    pub fn scope<'scope, F, T>(&self, f: F) -> impl Iterator<Item = T> + 'static
     where
-        F: FnOnce(&mut Scope<'scope, T>) + 'scope + Send,
+        F: FnOnce(&Scope<'scope, T>) + 'scope + Send,
         T: Send + 'static,
     {
-        TaskPool::LOCAL_EXECUTOR.with(|local_executor| {
-            // SAFETY: This function blocks until all futures complete, so this future must return
-            // before this function returns. However, rust has no way of knowing
-            // this so we must convert to 'static here to appease the compiler as it is unable to
-            // validate safety.
-            let executor: &async_executor::Executor = &*self.executor;
-            let executor: &'scope async_executor::Executor = unsafe { mem::transmute(executor) };
-            let local_executor: &'scope async_executor::LocalExecutor =
-                unsafe { mem::transmute(local_executor) };
-            let mut scope = Scope {
-                executor,
-                local_executor,
-                spawned: Vec::new(),
-            };
+        // SAFETY: This function blocks until all futures complete, so this future must return
+        // before this function returns. However, rust has no way of knowing
+        // this so we must convert to 'static here to appease the compiler as it is unable to
+        // validate safety.
+        let executor: &async_executor::Executor = &*self.executor;
+        let executor: &'scope async_executor::Executor = unsafe { mem::transmute(executor) };
+        let ster = async_executor::Executor::default();
+        let scope_thread_executor: &'scope async_executor::Executor =
+            unsafe { mem::transmute(&ster) };
+        let (tx, rx) = async_channel::unbounded::<T>();
+        let txref: &'scope Sender<T> = unsafe { mem::transmute(&tx) };
+        let scope = Scope {
+            executor,
+            scope_thread_executor,
+            results_tx: txref,
+        };
 
-            f(&mut scope);
+        f(&scope);
 
-            if scope.spawned.is_empty() {
-                Vec::default()
-            } else if scope.spawned.len() == 1 {
-                vec![future::block_on(&mut scope.spawned[0])]
-            } else {
-                let fut = async move {
-                    let mut results = Vec::with_capacity(scope.spawned.len());
-                    for task in scope.spawned {
-                        results.push(task.await);
+        loop {
+            if scope_thread_executor.is_empty() && executor.is_empty() {
+                struct RecvIter<T>(Receiver<T>);
+                impl<T> Iterator for RecvIter<T> {
+                    type Item = T;
+
+                    fn next(&mut self) -> Option<Self::Item> {
+                        self.0.try_recv().ok()
                     }
-
-                    results
-                };
-
-                // Pin the futures on the stack.
-                pin!(fut);
-
-                // SAFETY: This function blocks until all futures complete, so we do not read/write
-                // the data from futures outside of the 'scope lifetime. However,
-                // rust has no way of knowing this so we must convert to 'static
-                // here to appease the compiler as it is unable to validate safety.
-                let fut: Pin<&mut (dyn Future<Output = Vec<T>>)> = fut;
-                let fut: Pin<&'static mut (dyn Future<Output = Vec<T>> + 'static)> =
-                    unsafe { mem::transmute(fut) };
-
-                // The thread that calls scope() will participate in driving tasks in the pool
-                // forward until the tasks that are spawned by this scope() call
-                // complete. (If the caller of scope() happens to be a thread in
-                // this thread pool, and we only have one thread in the pool, then
-                // simply calling future::block_on(spawned) would deadlock.)
-                let mut spawned = local_executor.spawn(fut);
-                loop {
-                    if let Some(result) = future::block_on(future::poll_once(&mut spawned)) {
-                        break result;
-                    };
-
-                    self.executor.try_tick();
-                    local_executor.try_tick();
                 }
+
+                break RecvIter(rx);
+            } else {
+                futures_lite::future::block_on(scope_thread_executor.tick().or(executor.tick()));
             }
-        })
+        }
     }
 
     /// Spawns a static future onto the thread pool. The returned Task is a future. It can also be
@@ -274,8 +251,8 @@ impl Default for TaskPool {
 #[derive(Debug)]
 pub struct Scope<'scope, T> {
     executor: &'scope async_executor::Executor<'scope>,
-    local_executor: &'scope async_executor::LocalExecutor<'scope>,
-    spawned: Vec<async_executor::Task<T>>,
+    scope_thread_executor: &'scope async_executor::Executor<'scope>,
+    results_tx: &'scope Sender<T>,
 }
 
 impl<'scope, T: Send + 'scope> Scope<'scope, T> {
@@ -283,24 +260,28 @@ impl<'scope, T: Send + 'scope> Scope<'scope, T> {
     /// the provided future. The results of the future will be returned as a part of
     /// [`TaskPool::scope`]'s return value.
     ///
-    /// If the provided future is non-`Send`, [`Scope::spawn_local`] should be used
-    /// instead.
-    ///
     /// For more information, see [`TaskPool::scope`].
-    pub fn spawn<Fut: Future<Output = T> + 'scope + Send>(&mut self, f: Fut) {
-        let task = self.executor.spawn(f);
-        self.spawned.push(task);
+    pub fn spawn<Fut: Future<Output = T> + 'scope + Send>(&self, f: Fut) {
+        let tx_ref = self.results_tx;
+        self.executor
+            .spawn(async move {
+                tx_ref.send(f.await).await.ok();
+            })
+            .detach();
     }
 
-    /// Spawns a scoped future onto the thread-local executor. The scope *must* outlive
-    /// the provided future. The results of the future will be returned as a part of
-    /// [`TaskPool::scope`]'s return value.  Users should generally prefer to use
-    /// [`Scope::spawn`] instead, unless the provided future is not `Send`.
+    /// Spawns a scoped future onto the thread [`TaskPool::scope`] was called on.
+    /// The scope *must* outlive the provided future. The results of the future will
+    /// be returned as a part of [`TaskPool::scope`]'s return value.
     ///
     /// For more information, see [`TaskPool::scope`].
-    pub fn spawn_local<Fut: Future<Output = T> + 'scope>(&mut self, f: Fut) {
-        let task = self.local_executor.spawn(f);
-        self.spawned.push(task);
+    pub fn spawn_on_scope<Fut: Future<Output = T> + 'scope + Send>(&self, f: Fut) {
+        let tx_ref = self.results_tx;
+        self.scope_thread_executor
+            .spawn(async move {
+                tx_ref.send(f.await).await.ok();
+            })
+            .detach();
     }
 }
 
@@ -322,19 +303,21 @@ mod tests {
 
         let count = Arc::new(AtomicI32::new(0));
 
-        let outputs = pool.scope(|scope| {
-            for _ in 0..100 {
-                let count_clone = count.clone();
-                scope.spawn(async move {
-                    if *foo != 42 {
-                        panic!("not 42!?!?")
-                    } else {
-                        count_clone.fetch_add(1, Ordering::Relaxed);
-                        *foo
-                    }
-                });
-            }
-        });
+        let outputs: Vec<_> = pool
+            .scope(|scope| {
+                for _ in 0..100 {
+                    let count_clone = count.clone();
+                    scope.spawn(async move {
+                        if *foo != 42 {
+                            panic!("not 42!?!?")
+                        } else {
+                            count_clone.fetch_add(1, Ordering::Relaxed);
+                            *foo
+                        }
+                    });
+                }
+            })
+            .collect();
 
         for output in &outputs {
             assert_eq!(*output, 42);
@@ -354,31 +337,33 @@ mod tests {
         let local_count = Arc::new(AtomicI32::new(0));
         let non_local_count = Arc::new(AtomicI32::new(0));
 
-        let outputs = pool.scope(|scope| {
-            for i in 0..100 {
-                if i % 2 == 0 {
-                    let count_clone = non_local_count.clone();
-                    scope.spawn(async move {
-                        if *foo != 42 {
-                            panic!("not 42!?!?")
-                        } else {
-                            count_clone.fetch_add(1, Ordering::Relaxed);
-                            *foo
-                        }
-                    });
-                } else {
-                    let count_clone = local_count.clone();
-                    scope.spawn_local(async move {
-                        if *foo != 42 {
-                            panic!("not 42!?!?")
-                        } else {
-                            count_clone.fetch_add(1, Ordering::Relaxed);
-                            *foo
-                        }
-                    });
+        let outputs: Vec<_> = pool
+            .scope(|scope| {
+                for i in 0..100 {
+                    if i % 2 == 0 {
+                        let count_clone = non_local_count.clone();
+                        scope.spawn(async move {
+                            if *foo != 42 {
+                                panic!("not 42!?!?")
+                            } else {
+                                count_clone.fetch_add(1, Ordering::Relaxed);
+                                *foo
+                            }
+                        });
+                    } else {
+                        let count_clone = local_count.clone();
+                        scope.spawn_on_scope(async move {
+                            if *foo != 42 {
+                                panic!("not 42!?!?")
+                            } else {
+                                count_clone.fetch_add(1, Ordering::Relaxed);
+                                *foo
+                            }
+                        });
+                    }
                 }
-            }
-        });
+            })
+            .collect();
 
         for output in &outputs {
             assert_eq!(*output, 42);
@@ -402,14 +387,14 @@ mod tests {
             let inner_pool = pool.clone();
             let inner_thread_check_failed = thread_check_failed.clone();
             std::thread::spawn(move || {
-                inner_pool.scope(|scope| {
+                let _ = inner_pool.scope(|scope| {
                     let inner_count_clone = count_clone.clone();
                     scope.spawn(async move {
                         inner_count_clone.fetch_add(1, Ordering::Release);
                     });
                     let spawner = std::thread::current().id();
                     let inner_count_clone = count_clone.clone();
-                    scope.spawn_local(async move {
+                    scope.spawn_on_scope(async move {
                         inner_count_clone.fetch_add(1, Ordering::Release);
                         if std::thread::current().id() != spawner {
                             // NOTE: This check is using an atomic rather than simply panicing the
