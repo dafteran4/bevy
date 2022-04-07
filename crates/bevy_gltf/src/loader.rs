@@ -412,6 +412,7 @@ async fn load_gltf<'a, 'b>(
                     });
                 });
             })
+            .collect::<Vec<_>>()
             .into_iter()
             .filter_map(|res| {
                 if let Err(err) = res.as_ref() {

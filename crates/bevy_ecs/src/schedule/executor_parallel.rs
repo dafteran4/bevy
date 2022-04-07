@@ -179,7 +179,7 @@ impl ParallelExecutor {
     /// queues systems with no dependencies to run (or skip) at next opportunity.
     fn prepare_systems<'scope>(
         &mut self,
-        scope: &mut Scope<'scope, ()>,
+        scope: &Scope<'scope, ()>,
         systems: &'scope mut [ParallelSystemContainer],
         world: &'scope World,
     ) {
@@ -221,7 +221,7 @@ impl ParallelExecutor {
                 if system_data.is_send {
                     scope.spawn(task);
                 } else {
-                    scope.spawn_local(task);
+                    scope.spawn_on_scope(task);
                 }
             }
             // Queue the system if it has no dependencies, otherwise reset its dependency counter.
