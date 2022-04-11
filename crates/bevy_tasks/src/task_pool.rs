@@ -174,7 +174,7 @@ impl TaskPool {
     /// This is similar to `rayon::scope` and `crossbeam::scope`
     pub fn scope<'scope, F, T>(&self, f: F) -> impl Iterator<Item = T> + 'static
     where
-        F: FnOnce(&Scope<'scope, T>) + 'scope + Send,
+        F: FnOnce(Arc<Scope<'scope, T>>) + 'scope + Send,
         T: Send + 'static,
     {
         // SAFETY: This function blocks until all futures complete, so this future must return
@@ -194,7 +194,7 @@ impl TaskPool {
             results_tx: txref,
         };
 
-        f(&scope);
+        f(Arc::new(scope));
 
         loop {
             if scope_thread_executor.is_empty() && executor.is_empty() {
@@ -414,5 +414,16 @@ mod tests {
         barrier.wait();
         assert!(!thread_check_failed.load(Ordering::Acquire));
         assert_eq!(count.load(Ordering::Acquire), 200);
+    }
+
+    #[test]
+    fn test_nested_spawn() {
+        let pool = TaskPool::new();
+        pool.scope(|scope| {
+            scope.clone().spawn(async move {
+                println!("hello from the first scoped thread");
+                scope.spawn(async move { println!("nested") });
+            });
+        });
     }
 }
