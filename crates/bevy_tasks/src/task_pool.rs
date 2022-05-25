@@ -6,7 +6,7 @@ use std::{
 };
 
 pub use crate::task_pool_builder::*;
-use futures_lite::{future, FutureExt};
+use futures_lite::future;
 
 use crate::{Task, TaskGroup};
 
@@ -133,13 +133,8 @@ impl TaskPool {
             make_thread_builder(&builder, "Compute", i)
                 .spawn(move || {
                     let compute = &groups.compute.executor;
-                    let future = async {
-                        loop {
-                            compute.tick().await;
-                        }
-                    };
                     // Use unwrap_err because we expect a Closed error
-                    future::block_on(shutdown_rx.recv().or(future)).unwrap_err();
+                    future::block_on(compute.run(shutdown_rx.recv())).unwrap_err();
                 })
                 .expect("Failed to spawn thread.")
         }));
@@ -150,13 +145,8 @@ impl TaskPool {
                 .spawn(move || {
                     let compute = &groups.compute.executor;
                     let io = &groups.io.executor;
-                    let future = async {
-                        loop {
-                            io.tick().or(compute.tick()).await;
-                        }
-                    };
                     // Use unwrap_err because we expect a Closed error
-                    future::block_on(shutdown_rx.recv().or(future)).unwrap_err();
+                    future::block_on(compute.run(io.run(shutdown_rx.recv()))).unwrap_err();
                 })
                 .expect("Failed to spawn thread.")
         }));
@@ -168,13 +158,9 @@ impl TaskPool {
                     let compute = &groups.compute.executor;
                     let async_compute = &groups.async_compute.executor;
                     let io = &groups.io.executor;
-                    let future = async {
-                        loop {
-                            async_compute.tick().or(compute.tick()).or(io.tick()).await;
-                        }
-                    };
                     // Use unwrap_err because we expect a Closed error
-                    future::block_on(shutdown_rx.recv().or(future)).unwrap_err();
+                    future::block_on(io.run(compute.run(async_compute.run(shutdown_rx.recv()))))
+                        .unwrap_err();
                 })
                 .expect("Failed to spawn thread.")
         }));
@@ -244,13 +230,7 @@ impl TaskPool {
                         results
                     };
 
-                    let tick_forever = async move {
-                        loop {
-                            local_executor.tick().or(executor.tick()).await;
-                        }
-                    };
-
-                    get_results.or(tick_forever).await
+                    executor.run(local_executor.run(get_results)).await
                 }),
             }
         })
