@@ -10,6 +10,9 @@ use futures_lite::{future, pin};
 
 use crate::Task;
 
+#[cfg(feature = "trace_tasks")]
+use bevy_utils::tracing::Instrument;
+
 /// Used to create a [`TaskPool`]
 #[derive(Debug, Default, Clone)]
 #[must_use]
@@ -146,6 +149,11 @@ impl TaskPool {
                 thread_builder
                     .spawn(move || {
                         let shutdown_future = ex.run(shutdown_rx.recv());
+                        #[cfg(feature = "trace_tasks")]
+                        let span = bevy_utils::tracing::info_span!("thread executor");
+                        #[cfg(feature = "trace_tasks")]
+                        let shutdown_future = shutdown_future.instrument(span);
+
                         // Use unwrap_err because we expect a Closed error
                         future::block_on(shutdown_future).unwrap_err();
                     })
