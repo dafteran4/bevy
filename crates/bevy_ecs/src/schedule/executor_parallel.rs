@@ -6,7 +6,7 @@ use crate::{
 };
 use async_channel::{Receiver, Sender};
 use bevy_tasks::{ComputeTaskPool, Scope, TaskPool};
-#[cfg(feature = "trace")]
+#[cfg(feature = "trace_systems")]
 use bevy_utils::tracing::Instrument;
 use fixedbitset::FixedBitSet;
 
@@ -151,9 +151,9 @@ impl ParallelSystemExecutor for ParallelExecutor {
                     self.update_counters_and_queue_systems();
                 }
             };
-            #[cfg(feature = "trace")]
+            #[cfg(feature = "trace_systems")]
             let span = bevy_utils::tracing::info_span!("parallel executor");
-            #[cfg(feature = "trace")]
+            #[cfg(feature = "trace_systems")]
             let parallel_executor = parallel_executor.instrument(span);
             scope.spawn(parallel_executor);
         });
@@ -181,9 +181,9 @@ impl ParallelExecutor {
                 let start_receiver = system_data.start_receiver.clone();
                 let finish_sender = self.finish_sender.clone();
                 let system = system.system_mut();
-                #[cfg(feature = "trace")] // NB: outside the task to get the TLS current span
+                #[cfg(feature = "trace_systems")] // NB: outside the task to get the TLS current span
                 let system_span = bevy_utils::tracing::info_span!("system", name = &*system.name());
-                #[cfg(feature = "trace")]
+                #[cfg(feature = "trace_systems")]
                 let overhead_span =
                     bevy_utils::tracing::info_span!("system overhead", name = &*system.name());
                 let task = async move {
@@ -191,10 +191,10 @@ impl ParallelExecutor {
                         .recv()
                         .await
                         .unwrap_or_else(|error| unreachable!("{}", error));
-                    #[cfg(feature = "trace")]
+                    #[cfg(feature = "trace_systems")]
                     let system_guard = system_span.enter();
                     unsafe { system.run_unsafe((), world) };
-                    #[cfg(feature = "trace")]
+                    #[cfg(feature = "trace_systems")]
                     drop(system_guard);
                     finish_sender
                         .send(index)
@@ -202,7 +202,7 @@ impl ParallelExecutor {
                         .unwrap_or_else(|error| unreachable!("{}", error));
                 };
 
-                #[cfg(feature = "trace")]
+                #[cfg(feature = "trace_systems")]
                 let task = task.instrument(overhead_span);
                 if system_data.is_send {
                     scope.spawn(task);

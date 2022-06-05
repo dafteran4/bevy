@@ -213,7 +213,7 @@ impl SystemStage {
     pub fn apply_buffers(&mut self, world: &mut World) {
         for container in &mut self.parallel {
             let system = container.system_mut();
-            #[cfg(feature = "trace")]
+            #[cfg(feature = "trace_systems")]
             let _span = bevy_utils::tracing::info_span!("system_commands", name = &*system.name())
                 .entered();
             system.apply_buffers(world);
@@ -804,7 +804,7 @@ impl Stage for SystemStage {
                 let (run_criteria, tail) = self.run_criteria.split_at_mut(index);
                 let mut criteria = &mut tail[0];
 
-                #[cfg(feature = "trace")]
+                #[cfg(feature = "trace_systems")]
                 let _span =
                     bevy_utils::tracing::info_span!("run criteria", name = &*criteria.name())
                         .entered();
@@ -841,7 +841,7 @@ impl Stage for SystemStage {
                 // Run systems that want to be at the start of stage.
                 for container in &mut self.exclusive_at_start {
                     if should_run(container, &self.run_criteria, default_should_run) {
-                        #[cfg(feature = "trace")]
+                        #[cfg(feature = "trace_systems")]
                         let _system_span = bevy_utils::tracing::info_span!(
                             "exclusive_system",
                             name = &*container.name()
@@ -862,7 +862,7 @@ impl Stage for SystemStage {
                 // Run systems that want to be between parallel systems and their command buffers.
                 for container in &mut self.exclusive_before_commands {
                     if should_run(container, &self.run_criteria, default_should_run) {
-                        #[cfg(feature = "trace")]
+                        #[cfg(feature = "trace_systems")]
                         let _system_span = bevy_utils::tracing::info_span!(
                             "exclusive_system",
                             name = &*container.name()
@@ -876,7 +876,7 @@ impl Stage for SystemStage {
                 if self.apply_buffers {
                     for container in &mut self.parallel {
                         if container.should_run {
-                            #[cfg(feature = "trace")]
+                            #[cfg(feature = "trace_systems")]
                             let _span = bevy_utils::tracing::info_span!(
                                 "system_commands",
                                 name = &*container.name()
@@ -890,7 +890,7 @@ impl Stage for SystemStage {
                 // Run systems that want to be at the end of stage.
                 for container in &mut self.exclusive_at_end {
                     if should_run(container, &self.run_criteria, default_should_run) {
-                        #[cfg(feature = "trace")]
+                        #[cfg(feature = "trace_systems")]
                         let _system_span = bevy_utils::tracing::info_span!(
                             "exclusive_system",
                             name = &*container.name()
