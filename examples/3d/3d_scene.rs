@@ -17,20 +17,33 @@ fn main() {
                 percent: 0.0,
             },
             io: TaskPoolThreadAssignmentPolicy {
-                min_threads: 0,
+                min_threads: 3,
                 max_threads: 100,
                 percent: 0.0,
             },
             async_compute: TaskPoolThreadAssignmentPolicy {
-                min_threads: 0,
+                min_threads: 3,
                 max_threads: 100,
                 percent: 0.0,
             },
         })
         .add_plugins(DefaultPlugins)
         .add_startup_system(setup)
+        .add_system(sys)
         .run();
 }
+
+#[derive(Component, Copy, Clone)]
+struct Position(Vec3);
+
+#[derive(Component, Copy, Clone)]
+struct Rotation(Vec3);
+
+#[derive(Component, Copy, Clone)]
+struct Velocity(Vec3);
+
+#[derive(Component, Copy, Clone)]
+struct Transform2(Mat4);
 
 /// set up a simple 3D scene
 fn setup(
@@ -65,5 +78,24 @@ fn setup(
     commands.spawn_bundle(Camera3dBundle {
         transform: Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
         ..default()
+    });
+
+    commands.spawn_batch((0..1000).map(|_| {
+        (
+            Transform2(Mat4::from_axis_angle(Vec3::X, 1.2)),
+            Position(Vec3::X),
+            Rotation(Vec3::X),
+            Velocity(Vec3::X),
+        )
+    }));
+}
+
+fn sys(mut query: Query<(&mut Position, &mut Transform2)>) {
+    query.par_for_each_mut(10, |(mut pos, mut mat)| {
+        for _ in 0..100 {
+            mat.0 = mat.0.inverse();
+        }
+
+        pos.0 = mat.0.transform_vector3(pos.0);
     });
 }
