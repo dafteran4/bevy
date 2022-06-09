@@ -1,9 +1,32 @@
 //! A simple 3D scene with light shining over a cube sitting on a plane.
 
-use bevy::prelude::*;
+use bevy::{core::TaskPoolThreadAssignmentPolicy, prelude::*};
 
 fn main() {
     App::new()
+        .insert_resource(WindowDescriptor {
+            present_mode: bevy::window::PresentMode::Immediate,
+            ..default()
+        })
+        .insert_resource(DefaultTaskPoolOptions {
+            max_total_threads: 1,
+            min_total_threads: 1,
+            compute: TaskPoolThreadAssignmentPolicy {
+                min_threads: 12,
+                max_threads: 100,
+                percent: 0.0,
+            },
+            io: TaskPoolThreadAssignmentPolicy {
+                min_threads: 0,
+                max_threads: 100,
+                percent: 0.0,
+            },
+            async_compute: TaskPoolThreadAssignmentPolicy {
+                min_threads: 0,
+                max_threads: 100,
+                percent: 0.0,
+            },
+        })
         .add_plugins(DefaultPlugins)
         .add_startup_system(setup)
         .run();
