@@ -88,7 +88,8 @@ impl Debug for App {
 /// Each `SubApp` has its own [`Schedule`] and [`World`], enabling a separation of concerns.
 struct SubApp {
     app: App,
-    runner: Box<dyn Fn(&mut World, &mut App)>,
+    extract: Box<dyn Fn(&mut World, &mut App)>,
+    runner: Box<dyn Fn(&mut App)>,
 }
 
 impl Debug for SubApp {
@@ -151,7 +152,8 @@ impl App {
         let _bevy_frame_update_span = info_span!("frame").entered();
         self.schedule.run(&mut self.world);
         for sub_app in self.sub_apps.values_mut() {
-            (sub_app.runner)(&mut self.world, &mut sub_app.app);
+            (sub_app.extract)(&mut self.world, &mut sub_app.app);
+            (sub_app.runner)(&mut sub_app.app);
         }
     }
 
@@ -990,12 +992,14 @@ impl App {
         &mut self,
         label: impl AppLabel,
         app: App,
-        sub_app_runner: impl Fn(&mut World, &mut App) + 'static,
+        sub_app_extract: impl Fn(&mut World, &mut App) + 'static,
+        sub_app_runner: impl Fn(&mut App) + 'static,
     ) -> &mut Self {
         self.sub_apps.insert(
             label.as_label(),
             SubApp {
                 app,
+                extract: Box::new(sub_app_extract),
                 runner: Box::new(sub_app_runner),
             },
         );
