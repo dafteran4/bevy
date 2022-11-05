@@ -267,41 +267,24 @@ impl TaskPool {
         if spawned.is_empty() {
             Vec::new()
         } else {
-            let get_results = async move {
-                let mut results = Vec::with_capacity(spawned.len());
-                while let Ok(task) = spawned.pop() {
-                    results.push(task.await);
-                }
+            future::block_on(async move {
+                let get_results = async move {
+                    let mut results = Vec::with_capacity(scope.spawned.len());
+                    while let Ok(task) = spawned.pop() {
+                        results.push(task.await);
+                    }
 
-                results
-            };
-
-            // Pin the futures on the stack.
-            pin!(get_results);
-
-            // SAFETY: This function blocks until all futures complete, so we do not read/write
-            // the data from futures outside of the 'scope lifetime. However,
-            // rust has no way of knowing this so we must convert to 'static
-            // here to appease the compiler as it is unable to validate safety.
-            let get_results: Pin<&mut (dyn Future<Output = Vec<T>> + 'static + Send)> = get_results;
-            let get_results: Pin<&'static mut (dyn Future<Output = Vec<T>> + 'static + Send)> =
-                unsafe { mem::transmute(get_results) };
-
-            // The thread that calls scope() will participate in driving tasks in the pool
-            // forward until the tasks that are spawned by this scope() call
-            // complete. (If the caller of scope() happens to be a thread in
-            // this thread pool, and we only have one thread in the pool, then
-            // simply calling future::block_on(spawned) would deadlock.)
-            let mut spawned = task_scope_executor.spawn(get_results);
-
-            loop {
-                if let Some(result) = future::block_on(future::poll_once(&mut spawned)) {
-                    break result;
+                    results
                 };
 
-                self.executor.try_tick();
-                task_scope_executor.try_tick();
-            }
+                let tick_forever = async move {
+                    loop {
+                        task_scope_executor.tick().await;
+                    }
+                };
+
+                executor.run(tick_forever).or(get_results).await
+            })
         }
     }
 
