@@ -2,14 +2,15 @@ use std::{
     future::Future,
     marker::PhantomData,
     mem,
-    pin::Pin,
     sync::Arc,
     thread::{self, JoinHandle},
 };
 
 use concurrent_queue::ConcurrentQueue;
-use futures_lite::{future, pin, FutureExt};
+use futures_lite::{future, FutureExt};
+use is_main_thread::is_main_thread;
 
+use crate::MainThreadExecutor;
 use crate::Task;
 
 /// Used to create a [`TaskPool`]
@@ -279,6 +280,12 @@ impl TaskPool {
 
                 let tick_forever = async move {
                     loop {
+                        if let Some(is_main) = is_main_thread() {
+                            if is_main {
+                                MainThreadExecutor::get().tick().await;
+                            }
+                        }
+
                         task_scope_executor.tick().await;
                     }
                 };
