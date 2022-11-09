@@ -4,7 +4,7 @@ mod web_resize;
 mod winit_config;
 mod winit_windows;
 
-use bevy_render::pipelined_rendering::{setup_pipelined_rendering, update_rendering};
+use bevy_render::pipelined_rendering::setup_rendering;
 use converters::convert_cursor_grab_mode;
 pub use winit_config::*;
 pub use winit_windows::*;
@@ -352,7 +352,7 @@ pub fn winit_runner_with(mut app: App) {
 
     let return_from_run = app.world.resource::<WinitSettings>().return_from_run;
 
-    setup_pipelined_rendering(&mut app);
+    setup_rendering(&mut app);
 
     trace!("Entering winit event loop");
 
@@ -601,8 +601,7 @@ pub fn winit_runner_with(mut app: App) {
                 };
                 if update {
                     winit_state.last_update = Instant::now();
-                    update_rendering(&mut app);
-                    // app.update();
+                    app.update();
                 }
             }
             Event::RedrawEventsCleared => {
