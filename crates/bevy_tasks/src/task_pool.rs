@@ -10,7 +10,7 @@ use concurrent_queue::ConcurrentQueue;
 use futures_lite::{future, FutureExt};
 
 use crate::Task;
-use crate::{main_thread_executor::MainThreadSpawner, ThreadExecutor};
+use crate::{main_thread_executor::ThreadSpawner, ThreadExecutor};
 
 /// Used to create a [`TaskPool`]
 #[derive(Debug, Default, Clone)]
@@ -157,7 +157,7 @@ impl TaskPool {
     ///
     /// This is similar to `rayon::scope` and `crossbeam::scope`
     ///
-    /// The `thread_executor` optional parameter can be used to pass a `[ThreadExecutor]` to
+    /// The `thread_executor` optional parameter can be used to pass a [`ThreadExecutor`] to
     /// spawn tasks on when calling `spawn_on_scope`. This can be useful for spawning tasks that
     /// must run on the main thread. If `None` is passed then `spawn_on_scope` runs tasks on
     /// the thread `scope` is run on.
@@ -257,7 +257,7 @@ impl TaskPool {
             Arc::new(ThreadExecutor::new())
         };
         let thread_spawner = thread_executor.spawner();
-        let thread_spawner: MainThreadSpawner<'env> = unsafe { mem::transmute(thread_spawner) };
+        let thread_spawner: ThreadSpawner<'env> = unsafe { mem::transmute(thread_spawner) };
         let spawned: ConcurrentQueue<async_executor::Task<T>> = ConcurrentQueue::unbounded();
         let spawned_ref: &'env ConcurrentQueue<async_executor::Task<T>> =
             unsafe { mem::transmute(&spawned) };
@@ -371,7 +371,7 @@ impl Drop for TaskPool {
 #[derive(Debug)]
 pub struct Scope<'scope, 'env: 'scope, T> {
     executor: &'scope async_executor::Executor<'scope>,
-    thread_spawner: MainThreadSpawner<'scope>,
+    thread_spawner: ThreadSpawner<'scope>,
     spawned: &'scope ConcurrentQueue<async_executor::Task<T>>,
     // make `Scope` invariant over 'scope and 'env
     scope: PhantomData<&'scope mut &'scope ()>,
