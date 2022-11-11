@@ -45,7 +45,6 @@ use crate::{
     camera::CameraPlugin,
     color::Color,
     mesh::MeshPlugin,
-    pipelined_rendering::build_pipelined_rendering,
     primitives::{CubemapFrusta, Frustum},
     render_graph::RenderGraph,
     render_resource::{PipelineCache, Shader, ShaderLoader},
@@ -62,23 +61,8 @@ use std::{
 };
 
 /// Contains the default Bevy rendering backend based on wgpu.
-pub struct RenderPlugin {
-    /// Pipelined rendering runs the rendering simultaneously with the main app.
-    /// Use this to turn pipelined rendering on or off. By default it's on in native
-    /// environments and off in wasm.
-    pub use_pipelined_rendering: bool,
-}
-
-impl Default for RenderPlugin {
-    fn default() -> Self {
-        RenderPlugin {
-            #[cfg(not(target_arch = "wasm32"))]
-            use_pipelined_rendering: true,
-            #[cfg(target_arch = "wasm32")]
-            use_pipelined_rendering: false,
-        }
-    }
-}
+#[derive(Default)]
+pub struct RenderPlugin;
 
 /// The labels of the default App rendering stages.
 #[derive(Debug, Hash, PartialEq, Eq, Clone, StageLabel)]
@@ -345,10 +329,6 @@ impl Plugin for RenderPlugin {
                     render_app.world.clear_entities();
                 }
             });
-
-            if self.use_pipelined_rendering {
-                build_pipelined_rendering(app);
-            }
         }
 
         app.add_plugin(ValidParentCheckPlugin::<ComputedVisibility>::default())
