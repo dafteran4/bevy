@@ -264,6 +264,10 @@ wasm = true
 
 # 3D Rendering
 [[example]]
+name = "multi_app_updates_while_rendering"
+path = "examples/3d/multi_app_updates_while_rendering.rs"
+
+[[example]]
 name = "3d_scene"
 path = "examples/3d/3d_scene.rs"
 
