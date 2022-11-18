@@ -12,6 +12,7 @@ mod ci_testing;
 
 pub use app::*;
 pub use bevy_derive::DynamicPlugin;
+pub use bevy_ecs::system::Resource;
 pub use plugin::*;
 pub use plugin_group::*;
 pub use schedule_runner::*;
@@ -64,3 +65,7 @@ pub enum StartupStage {
     /// The [`Stage`](bevy_ecs::schedule::Stage) that runs once after [`StartupStage::Startup`].
     PostStartup,
 }
+
+#[derive(Resource)]
+/// Allow multiple app updates while rendering a single frame (only makes sense with pipelined rendering)
+pub struct AllowMultipleAppStepsWhileRendering(pub bool);

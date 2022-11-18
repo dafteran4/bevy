@@ -164,9 +164,11 @@ pub struct WindowSurfaces {
 ///   [`Backends::GL`](crate::settings::Backends::GL) if your GPU/drivers support `OpenGL 4.3` / `OpenGL ES 3.0` or
 ///   later.
 pub fn prepare_windows(
-    // By accessing a NonSend resource, we tell the scheduler to put this system on the main thread,
-    // which is necessary for some OS s
-    _marker: NonSend<NonSendMarker>,
+    // TODO: sending a NonSend resource does not work with AllowMultipleAppUpdtesWhileRendering,
+    // figure out a better way to do this
+    //// By accessing a NonSend resource, we tell the scheduler to put this system on the main thread,
+    //// which is necessary for some OS s
+    //_marker: NonSend<NonSendMarker>,
     mut windows: ResMut<ExtractedWindows>,
     mut window_surfaces: ResMut<WindowSurfaces>,
     render_device: Res<RenderDevice>,

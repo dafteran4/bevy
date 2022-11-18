@@ -9,6 +9,7 @@ pub use stopwatch::*;
 pub use time::*;
 pub use timer::*;
 
+use bevy_app::AllowMultipleAppStepsWhileRendering;
 use bevy_ecs::system::{Res, ResMut};
 use bevy_utils::{tracing::warn, Duration, Instant};
 use crossbeam_channel::{Receiver, Sender};
@@ -81,15 +82,23 @@ fn time_system(
     mut time: ResMut<Time>,
     update_strategy: Res<TimeUpdateStrategy>,
     time_recv: Option<Res<TimeReceiver>>,
+    allow_multi_app_step: Option<Res<AllowMultipleAppStepsWhileRendering>>,
     mut has_received_time: Local<bool>,
 ) {
     let new_time = if let Some(time_recv) = time_recv {
         // TODO: Figure out how to handle this when using pipelined rendering.
+
+        let allow_multi_app_step = allow_multi_app_step.map_or(false, |r| r.0);
+
         if let Ok(new_time) = time_recv.0.try_recv() {
             *has_received_time = true;
-            new_time
+            if allow_multi_app_step {
+                Instant::now()
+            } else {
+                new_time
+            }
         } else {
-            if *has_received_time {
+            if *has_received_time && !allow_multi_app_step {
                 warn!("time_system did not receive the time from the render world! Calculations depending on the time may be incorrect.");
             }
             Instant::now()

@@ -1,6 +1,6 @@
 use async_channel::{Receiver, Sender};
 
-use bevy_app::{App, AppLabel, Plugin, SubApp};
+use bevy_app::{App, AppLabel, Plugin, SubApp, AllowMultipleAppStepsWhileRendering};
 use bevy_ecs::{
     schedule::{MainThreadExecutor, StageLabel, SystemStage},
     system::Resource,
@@ -101,22 +101,37 @@ impl Plugin for PipelinedRenderingPlugin {
 // This function waits for the rendering world to be sent back,
 // runs extract, and then sends the rendering world back to the render thread.
 fn update_rendering(app_world: &mut World, _sub_app: &mut App) {
+
     app_world.resource_scope(|world, main_thread_executor: Mut<MainThreadExecutor>| {
+
+        let allow_multi_app_step = world
+            .get_resource::<AllowMultipleAppStepsWhileRendering>()
+            .map_or(false, |r| r.0);
+
         // we use a scope here to run any main thread tasks that the render world still needs to run
         // while we wait for the render world to be received.
-        let mut render_app = ComputeTaskPool::get()
+        let render_app = ComputeTaskPool::get()
             .scope_with_executor(true, Some(main_thread_executor.0.clone()), |s| {
                 s.spawn(async {
                     let receiver = world.get_resource::<RenderToMainAppReceiver>().unwrap();
-                    receiver.0.recv().await.unwrap()
+                    if allow_multi_app_step {
+                        if let Ok(subapp) = receiver.0.try_recv() {
+                            Some(subapp)
+                        } else {
+                            None
+                        }
+                    } else {
+                        Some(receiver.0.recv().await.unwrap())
+                    }
                 });
             })
             .pop()
             .unwrap();
 
-        render_app.extract(world);
-
-        let sender = world.get_resource::<MainToRenderAppSender>().unwrap();
-        sender.0.send_blocking(render_app).unwrap();
+        if let Some(mut render_app) = render_app {
+            render_app.extract(world);
+            let sender = world.get_resource::<MainToRenderAppSender>().unwrap();
+            sender.0.send_blocking(render_app).unwrap();
+        }
     });
 }

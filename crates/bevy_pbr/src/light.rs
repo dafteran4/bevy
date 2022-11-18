@@ -864,6 +864,7 @@ pub(crate) fn assign_lights_to_clusters(
     mut cluster_aabb_spheres: Local<Vec<Option<Sphere>>>,
     mut max_point_lights_warning_emitted: Local<bool>,
     render_device: Option<Res<RenderDevice>>,
+    mut clustered_forward_buffer_binding_type: Local<Option<BufferBindingType>>,
 ) {
     let render_device = match render_device {
         Some(render_device) => render_device,
@@ -902,8 +903,10 @@ pub(crate) fn assign_lights_to_clusters(
             ),
     );
 
-    let clustered_forward_buffer_binding_type =
-        render_device.get_supported_read_only_binding_type(CLUSTERED_FORWARD_STORAGE_BUFFER_COUNT);
+    let clustered_forward_buffer_binding_type = clustered_forward_buffer_binding_type.get_or_insert_with(|| {
+        render_device.get_supported_read_only_binding_type(CLUSTERED_FORWARD_STORAGE_BUFFER_COUNT)
+    });
+
     let supports_storage_buffers = matches!(
         clustered_forward_buffer_binding_type,
         BufferBindingType::Storage { .. }
